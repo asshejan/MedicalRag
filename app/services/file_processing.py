@@ -1,9 +1,6 @@
 import os
 import fitz  # PyMuPDF
 import pandas as pd
-import pytesseract
-from PIL import Image
-from moviepy.editor import VideoFileClip
 import tempfile
 
 # Extract text from PDF
@@ -24,13 +21,13 @@ def extract_text_from_csv(file_path: str) -> str:
 # Extract text from image using OCR
 
 def extract_text_from_image(file_path: str) -> str:
-    img = Image.open(file_path)
-    return pytesseract.image_to_string(img)
+    # Disabled to keep deployment lightweight on Render free tier
+    return "OCR disabled in this deployment."
 
 # Extract text from video using speech-to-text (placeholder)
 def extract_text_from_video(file_path: str) -> str:
-    # Placeholder: Implement speech-to-text with a real model/service
-    return "Speech-to-text not implemented."
+    # Disabled to keep deployment lightweight on Render free tier
+    return "Video transcription disabled in this deployment."
 
 # Main dispatcher
 

@@ -1,39 +1,50 @@
-from sentence_transformers import SentenceTransformer
+import os
+from typing import List
+
 import chromadb
 from chromadb.config import Settings
+from openai import OpenAI
 
-def chunk_text(text, max_length=500):
+
+def chunk_text(text: str, max_length: int = 500) -> List[str]:
     words = text.split()
-    chunks = []
+    chunks: List[str] = []
     for i in range(0, len(words), max_length):
-        chunk = ' '.join(words[i:i+max_length])
+        chunk = " ".join(words[i : i + max_length])
         chunks.append(chunk)
     return chunks
 
+
 class RAGPipeline:
-    def __init__(self, model_name='all-MiniLM-L6-v2', collection_name="rag_collection"):
-        self.model = SentenceTransformer(model_name)
-        self.client = chromadb.Client(Settings(
-            persist_directory=".chromadb"  # You can change this path as needed
-        ))
-        self.collection = self.client.get_or_create_collection(collection_name)
+    """Lightweight RAG pipeline using OpenAI embeddings and ChromaDB.
 
-    def add_document(self, text):
+    Avoids local transformer models to keep memory within Render free tier.
+    """
+
+    def __init__(self, collection_name: str = "rag_collection") -> None:
+        self._client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+        self._embed_model = "text-embedding-3-small"
+        self._chroma = chromadb.Client(
+            Settings(persist_directory=".chromadb")
+        )
+        self._collection = self._chroma.get_or_create_collection(collection_name)
+
+    def _embed_texts(self, texts: List[str]) -> List[List[float]]:
+        response = self._client.embeddings.create(
+            model=self._embed_model, input=texts
+        )
+        return [d.embedding for d in response.data]
+
+    def add_document(self, text: str) -> None:
         chunks = chunk_text(text, max_length=500)
-        embeddings = self.model.encode(chunks)
-        ids = [f"doc_{self.collection.count()}_{i}" for i in range(len(chunks))]
-        # Add chunks and embeddings to ChromaDB
-        self.collection.add(
-            documents=chunks,
-            embeddings=[emb.tolist() for emb in embeddings],
-            ids=ids
-        )
+        if not chunks:
+            return
+        embeddings = self._embed_texts(chunks)
+        start_index = self._collection.count()
+        ids = [f"doc_{start_index + i}" for i in range(len(chunks))]
+        self._collection.add(documents=chunks, embeddings=embeddings, ids=ids)
 
-    def retrieve(self, query, top_k=5):
-        query_emb = self.model.encode([query])[0].tolist()
-        results = self.collection.query(
-            query_embeddings=[query_emb],
-            n_results=top_k
-        )
-        # results['documents'] is a list of lists (one per query)
-        return results['documents'][0] if results['documents'] else []
+    def retrieve(self, query: str, top_k: int = 5) -> List[str]:
+        query_emb = self._embed_texts([query])[0]
+        results = self._collection.query(query_embeddings=[query_emb], n_results=top_k)
+        return results.get("documents", [[]])[0]

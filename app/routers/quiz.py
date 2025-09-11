@@ -10,7 +10,13 @@ UPLOAD_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "uploads")
 os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 QUIZ_STORE = {}
-rag_pipeline = RAGPipeline()
+_rag_pipeline: RAGPipeline | None = None
+
+def get_rag_pipeline() -> RAGPipeline:
+    global _rag_pipeline
+    if _rag_pipeline is None:
+        _rag_pipeline = RAGPipeline()
+    return _rag_pipeline
 
 router = APIRouter()
 
@@ -22,10 +28,9 @@ async def generate_quiz(
     difficulty: str = Form("basic"),
     qtype: str = Form("mcq")
 ):
+    # Keep lightweight types only to minimize memory usage on startup
     allowed_types = [
-        "application/pdf", "text/csv",
-        "image/jpeg", "image/png", "image/jpg",
-        "video/mp4", "video/quicktime"
+        "application/pdf", "text/csv"
     ]
     all_text = []
     for file in files:
@@ -36,13 +41,13 @@ async def generate_quiz(
         with open(file_location, "wb") as f:
             f.write(await file.read())
         text = extract_text(file_location, file.content_type)
-        rag_pipeline.add_document(text)
+        get_rag_pipeline().add_document(text)
         all_text.append(text)
         try:
             os.remove(file_location)
         except Exception as e:
             print(f"Warning: Could not delete file {file_location}: {e}")
-    context_list = rag_pipeline.retrieve(query, top_k=5)
+    context_list = get_rag_pipeline().retrieve(query, top_k=5)
     max_context_length = 3000
     context = "\n".join(context_list)
     if len(context) > max_context_length:
