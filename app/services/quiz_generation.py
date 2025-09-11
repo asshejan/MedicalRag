@@ -1,3 +1,31 @@
+def generate_flash_cards(prompt: str, num_cards: int = 10) -> list:
+    """
+    Generate flash cards using OpenAI. Each card is a dict with 'Question' and 'Answer' (short answer).
+    """
+    client = openai.OpenAI()
+    flash_prompt = (
+        prompt +
+        f" Generate {num_cards} flash cards. Each should be a JSON object with keys 'Question' and 'Answer' (answer must be short). Return a JSON array."
+        "\nExample: [\n  {\"Question\": \"What is the capital of France?\", \"Answer\": \"Paris\"}\n]"
+    )
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[{"role": "user", "content": flash_prompt}],
+        max_tokens=1024,
+        temperature=0.7,
+    )
+    text = response.choices[0].message.content
+    import json
+    try:
+        cards = json.loads(text)
+    except Exception:
+        import re
+        match = re.search(r'\[.*\]', text, re.DOTALL)
+        if match:
+            cards = json.loads(match.group(0))
+        else:
+            cards = []
+    return cards
 
 import openai
 import os
