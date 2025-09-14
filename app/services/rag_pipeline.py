@@ -30,19 +30,43 @@ class RAGPipeline:
         self._collection = self._chroma.get_or_create_collection(collection_name)
 
     def _embed_texts(self, texts: List[str]) -> List[List[float]]:
+        # Validate input
+        if not texts or not all(isinstance(t, str) and t.strip() for t in texts):
+            raise ValueError("Input must be a non-empty list of non-empty strings")
+        
+        # Clean and validate each text chunk
+        cleaned_texts = [t.strip() for t in texts if t and t.strip()]
+        if not cleaned_texts:
+            raise ValueError("No valid text chunks to embed after cleaning")
+            
         response = self._client.embeddings.create(
-            model=self._embed_model, input=texts
+            model=self._embed_model, input=cleaned_texts
         )
         return [d.embedding for d in response.data]
 
     def add_document(self, text: str) -> None:
+        # Validate input
+        if not isinstance(text, str) or not text.strip():
+            print("Invalid input: text must be a non-empty string")
+            return
+            
+        # Create and validate chunks
         chunks = chunk_text(text, max_length=500)
         if not chunks:
+            print("No valid chunks to process after splitting text")
             return
-        embeddings = self._embed_texts(chunks)
-        start_index = self._collection.count()
-        ids = [f"doc_{start_index + i}" for i in range(len(chunks))]
-        self._collection.add(documents=chunks, embeddings=embeddings, ids=ids)
+            
+        try:
+            print(f"Processing {len(chunks)} chunks...")
+            embeddings = self._embed_texts(chunks)
+            start_index = self._collection.count()
+            ids = [f"doc_{start_index + i}" for i in range(len(chunks))]
+            self._collection.add(documents=chunks, embeddings=embeddings, ids=ids)
+            print(f"Successfully added {len(chunks)} document chunks")
+        except ValueError as e:
+            print(f"Error processing document: {e}")
+        except Exception as e:
+            print(f"Unexpected error while adding document: {e}")
 
     def retrieve(self, query: str, top_k: int = 5) -> List[str]:
         query_emb = self._embed_texts([query])[0]

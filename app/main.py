@@ -10,7 +10,7 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 
 
-from app.routers import quiz, flashcard
+from app.routers import quiz, flashcard, tutor, tutor_upload
 
 app = FastAPI(
     title="Medical Student Assistant",
@@ -20,6 +20,8 @@ app = FastAPI(
 
 app.include_router(quiz.router)
 app.include_router(flashcard.router)
+app.include_router(tutor.router)
+app.include_router(tutor_upload.router)
 
 @app.get("/")
 def read_root():
