@@ -88,7 +88,47 @@ class RAGPipelinePinecone:
             chunks.append(" ".join(current_chunk))
         return chunks
 
-    def add_document(self, text: str) -> dict:
+    def _generate_document_fingerprint(self, text: str) -> str:
+        """Generate a fingerprint for a document to identify duplicates."""
+        import hashlib
+        # Create a hash of the first 1000 characters to use as a fingerprint
+        # This helps identify if the same document is being uploaded multiple times
+        return hashlib.md5(text[:1000].encode()).hexdigest()
+    
+    def document_exists(self, text: str) -> bool:
+        """Check if a document with similar content already exists in the index."""
+        if not text or not text.strip():
+            return False
+            
+        # Generate fingerprint from the first part of the document
+        fingerprint = self._generate_document_fingerprint(text)
+        
+        try:
+            # Create a query vector from the first chunk of text
+            first_chunk = self.chunk_text(text)[0] if len(text) > 100 else text
+            query_emb = self._embed_texts([first_chunk])[0]
+            
+            # Query with high similarity threshold
+            results = self._index.query(
+                vector=query_emb,
+                top_k=5,
+                include_metadata=True
+            )
+            
+            # Check if any results have matching fingerprint in metadata
+            for match in results.matches:
+                if match.score > 0.95:  # High similarity threshold
+                    stored_fingerprint = match.metadata.get("fingerprint")
+                    if stored_fingerprint and stored_fingerprint == fingerprint:
+                        print(f"Document already exists with fingerprint: {fingerprint}")
+                        return True
+                        
+            return False
+        except Exception as e:
+            print(f"Error checking document existence: {str(e)}")
+            return False
+    
+    def add_document(self, text: str, user_id: str = None, session_id: str = None, metadata: dict = None) -> dict:
         """Add a document to the RAG pipeline and return processing statistics."""
         # Validate input
         if not isinstance(text, str):
@@ -115,13 +155,27 @@ class RAGPipelinePinecone:
             embeddings = self._embed_texts(chunks)
             print(f"Generated {len(embeddings)} embeddings")
             
+            # Generate document fingerprint
+            fingerprint = self._generate_document_fingerprint(text)
+            
             # Create unique IDs
             ids = [f"doc_{i}_{os.urandom(4).hex()}" for i in range(len(chunks))]
             
             # Prepare vectors with metadata
             vectors = []
             for id, emb, chunk in zip(ids, embeddings, chunks):
-                vectors.append((id, emb, {"text": chunk}))
+                chunk_metadata = {
+                    "text": chunk,
+                    "fingerprint": fingerprint  # Add fingerprint to identify duplicates
+                }
+                if user_id:
+                    chunk_metadata["user_id"] = user_id
+                if session_id:
+                    chunk_metadata["session_id"] = session_id
+                # Add any additional metadata if provided
+                if metadata:
+                    chunk_metadata.update(metadata)
+                vectors.append((id, emb, chunk_metadata))
             
             # Upsert to Pinecone in batches
             total_vectors = 0
@@ -144,7 +198,7 @@ class RAGPipelinePinecone:
         except Exception as e:
             print(f"Error processing document: {str(e)}")
 
-    def retrieve(self, query: str, top_k: int = 5) -> List[str]:
+    def retrieve(self, query: str, top_k: int = 5, user_id: str = None, session_id: str = None) -> List[str]:
         """Retrieve relevant text chunks based on query similarity."""
         print(f"Retrieving for query: '{query}' with top_k={top_k}")
         
@@ -152,13 +206,27 @@ class RAGPipelinePinecone:
             query_emb = self._embed_texts([query])[0]
             print(f"Generated query embedding with dimension: {len(query_emb)}")
             
+            # Build filter for user-specific retrieval
+            filter_dict = {}
+            if user_id:
+                filter_dict["user_id"] = user_id
+            if session_id:
+                filter_dict["session_id"] = session_id
+            
             # Query with more detailed results
-            results = self._index.query(
-                vector=query_emb, 
-                top_k=top_k, 
-                include_metadata=True,
-                include_values=False  # We don't need the actual vector values
-            )
+            query_params = {
+                "vector": query_emb, 
+                "top_k": top_k, 
+                "include_metadata": True,
+                "include_values": False  # We don't need the actual vector values
+            }
+            
+            # Add filter if user_id or session_id is provided
+            if filter_dict:
+                query_params["filter"] = filter_dict
+                print(f"Using filter: {filter_dict}")
+            
+            results = self._index.query(**query_params)
             
             print(f"Found {len(results.matches)} matches")
             
@@ -179,6 +247,41 @@ class RAGPipelinePinecone:
             
         except Exception as e:
             print(f"Error during retrieval: {str(e)}")
+            return []
+    
+    def retrieve_with_filter(self, query: str, filter_dict: dict, top_k: int = 5) -> List[tuple]:
+        """Retrieve relevant text chunks based on query similarity with metadata filtering.
+        Returns a list of tuples (text, metadata) for each match."""
+        print(f"Retrieving for query: '{query}' with filter: {filter_dict}, top_k={top_k}")
+        
+        try:
+            query_emb = self._embed_texts([query])[0]
+            print(f"Generated query embedding with dimension: {len(query_emb)}")
+            
+            # Query with filter
+            query_params = {
+                "vector": query_emb, 
+                "top_k": top_k, 
+                "include_metadata": True,
+                "include_values": False,
+                "filter": filter_dict
+            }
+            
+            results = self._index.query(**query_params)
+            
+            print(f"Found {len(results.matches)} matches with filter")
+            
+            # Extract text chunks and metadata
+            retrieved_items = []
+            for match in results.matches:
+                text = match.metadata.get("text", "")
+                retrieved_items.append((text, match.metadata))
+            
+            print(f"Successfully retrieved {len(retrieved_items)} items with filter")
+            return retrieved_items
+            
+        except Exception as e:
+            print(f"Error during filtered retrieval: {str(e)}")
             return []
     
     def get_index_stats(self) -> dict:

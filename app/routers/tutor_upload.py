@@ -27,6 +27,21 @@ async def upload_knowledge_file(file: UploadFile = File(...)):
         if not text or not text.strip():
             raise HTTPException(status_code=400, detail="No text could be extracted from the file")
         
+        # Check if document already exists in the index
+        print(f"Checking if document already exists...")
+        if rag_pipeline.document_exists(text):
+            # Clean up the file since we don't need it
+            try:
+                os.remove(file_location)
+            except Exception as e:
+                print(f"Warning: Could not delete file {file_location}: {e}")
+                
+            return {
+                "message": "This document or very similar content already exists in the knowledge base.",
+                "status": "duplicate_document",
+                "filename": file.filename
+            }
+        
         print(f"Adding document to RAG pipeline...")
         
         # Check index health before adding document
